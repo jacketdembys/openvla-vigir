@@ -18,15 +18,17 @@ import time
 # Configuration
 RESIZE_IMAGE = False
 VISUALIZE_EACH_FRAME = False
-PUBLISH_RATE_HZ = 0.5  # Set desired publish rate in Hz (actions per second)
+PUBLISH_RATE_HZ = 0.2  # Set desired publish rate in Hz (actions per second)
+OPENVLA_MODEL_PATH = "/root/huggingface_models/openvla-7b"
+UNNORM_KEY = "bridge_orig"
 
 class OpenVLAImagePredictor(Node):
     def __init__(self):
         super().__init__('openvla_image_predictor')
         self.bridge = CvBridge()
-        self.processor = AutoProcessor.from_pretrained("openvla/openvla-7b", trust_remote_code=True)
+        self.processor = AutoProcessor.from_pretrained(OPENVLA_MODEL_PATH, trust_remote_code=True)
         self.vla = AutoModelForVision2Seq.from_pretrained(
-            "openvla/openvla-7b",
+            OPENVLA_MODEL_PATH,
             attn_implementation="flash_attention_2",
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
@@ -73,13 +75,13 @@ class OpenVLAImagePredictor(Node):
             plt.show()
 
         # Perform inference
-        current_prompt = 'Pick up the water bottle.'
+        current_prompt = 'Pick up the yellow object.'
         prompt = f"In: What action should the robot take to {current_prompt}?\nOut:"
         self.get_logger().info(f"Current prompt {self.f} for frame {self.f}: {current_prompt}")
         self.get_logger().info(f"Prompt given to the robot: {prompt}")
         device = self.get_device()
         inputs = self.processor(prompt, image).to(device, dtype=torch.bfloat16)
-        action = self.vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
+        action = self.vla.predict_action(**inputs, unnorm_key=UNNORM_KEY, do_sample=False)
         action[-1] = np.round(action[-1])
         np.set_printoptions(suppress=True)
         print("[" + " ".join(f"{x:.8f}" for x in action) + "]\n")

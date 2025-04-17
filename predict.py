@@ -20,7 +20,7 @@ import tqdm
 
 USE_CAMERA_FEED           = False           # Use feed from camera: True / Use example data: False
 VISUALIZE_EXAMPLE_EPISODE = False           # From example data
-USE_WAND = True                             # Use wandb
+USE_WAND = False                            # Use wandb
 VISUALIZE_EACH_FRAME = False 
 RESIZE_IMAGE = False 
 DATASET = "bridge"   # jaco_play, droid           
