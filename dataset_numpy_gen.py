@@ -17,8 +17,11 @@ LANGUAGE_INSTRUCTIONS = {
     'yellow_on_cup': ['Put the yellow object on the cup']
 }
 
-def load_image_as_np(path):
-    return np.array(Image.open(path))
+def load_image_as_np(path, unsqueeze=False):
+    if unsqueeze:
+        return np.array(Image.open(path)).unsqueeze(2).astype(np.uint8)
+    else:
+        return np.array(Image.open(path)).astype(np.uint8)
 
 def build_state(entry):
     pos = entry['position']
@@ -27,7 +30,7 @@ def build_state(entry):
     # Use scipy for quaternion to roll, pitch, yaw
     quat = [orientation['x'], orientation['y'], orientation['z'], orientation['w']]
     roll, pitch, yaw = R.from_quat(quat).as_euler('xyz', degrees=False)
-    finger_val = 1.0 if any(f > 3500 for f in [fingers['finger1'], fingers['finger2'], fingers['finger3']]) else 0.0
+    finger_val = 1.0 if any(f > 5000 for f in [fingers['finger1'], fingers['finger2'], fingers['finger3']]) else 0.0
     return np.array([
         pos['x'], pos['y'], pos['z'],
         roll, pitch, yaw,
@@ -37,9 +40,9 @@ def build_state(entry):
 def build_action(entry):
     dp = entry['delta_position']
     dor = entry['delta_orientation_rpy']
-    df = entry['delta_fingers']
-    # Use 1.0 if any delta finger above 3500, else 0.0
-    finger_val = 1.0 if any(f > 3500 for f in [df['finger1'], df['finger2'], df['finger3']]) else 0.0
+    df = entry['fingers']
+    # Use 1.0 if any finger above 5000, else 0.0
+    finger_val = 1.0 if any(f > 5000 for f in [df['finger1'], df['finger2'], df['finger3']]) else 0.0
     return np.array([
         dp['x'], dp['y'], dp['z'],
         dor['roll'], dor['pitch'], dor['yaw'],
@@ -71,8 +74,8 @@ def create_camera_episodes(episode_dir, json_path, save_dir, episode_name=None):
                 frame_folder = os.path.join(episode_dir, str(frame_num))
                 rgb_path = os.path.join(frame_folder, f'camera_{serial}_rgb.jpg')
                 depth_path = os.path.join(frame_folder, f'camera_{serial}_depth.png')
-                image = load_image_as_np(rgb_path) if os.path.exists(rgb_path) else None
-                depth_image = load_image_as_np(depth_path) if os.path.exists(depth_path) else None
+                image = load_image_as_np(rgb_path, unsqueeze=False) if os.path.exists(rgb_path) else None
+                depth_image = load_image_as_np(depth_path, unsqueeze=True) if os.path.exists(depth_path) else None
                 state = build_state(entry)
                 action = build_action(entry)
                 episode.append({
