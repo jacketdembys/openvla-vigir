@@ -17,11 +17,30 @@ LANGUAGE_INSTRUCTIONS = {
     'yellow_on_cup': ['Put the yellow object on the cup']
 }
 
-def load_image_as_np(path, unsqueeze=False):
-    if unsqueeze:
-        return np.array(Image.open(path)).unsqueeze(2).astype(np.uint8)
+def load_image_as_np(path, mode=None):
+    img = Image.open(path)
+    # Mode can be 'rgb' or 'depth'. If None, infer from file extension
+    if mode is None:
+        if path.endswith('_rgb.jpg') or path.endswith('_rgb.png'):
+            mode = 'rgb'
+        else:
+            mode = 'depth'
+    if mode == 'rgb':
+        img = img.convert('RGB')
+        img = img.resize((640, 480))
+        arr = np.array(img).astype(np.uint8)
+        if arr.shape != (480, 640, 3):
+            arr = arr.reshape((480, 640, 3))
+        return arr
+    elif mode == 'depth':
+        img = img.convert('L')
+        img = img.resize((640, 480))
+        arr = np.array(img).astype(np.uint8)
+        arr = arr.reshape((480, 640))
+        arr = arr[:, :, np.newaxis]
+        return arr
     else:
-        return np.array(Image.open(path)).astype(np.uint8)
+        raise ValueError(f"Unknown mode: {mode}")
 
 def build_state(entry):
     pos = entry['position']
@@ -74,8 +93,8 @@ def create_camera_episodes(episode_dir, json_path, save_dir, episode_name=None):
                 frame_folder = os.path.join(episode_dir, str(frame_num))
                 rgb_path = os.path.join(frame_folder, f'camera_{serial}_rgb.jpg')
                 depth_path = os.path.join(frame_folder, f'camera_{serial}_depth.png')
-                image = load_image_as_np(rgb_path, unsqueeze=False) if os.path.exists(rgb_path) else None
-                depth_image = load_image_as_np(depth_path, unsqueeze=True) if os.path.exists(depth_path) else None
+                image = load_image_as_np(rgb_path, mode='rgb') if os.path.exists(rgb_path) else None
+                depth_image = load_image_as_np(depth_path, mode='depth') if os.path.exists(depth_path) else None
                 state = build_state(entry)
                 action = build_action(entry)
                 episode.append({

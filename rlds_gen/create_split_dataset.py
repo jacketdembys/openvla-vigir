@@ -3,6 +3,7 @@ import numpy as np
 import shutil
 import random
 from pathlib import Path
+from tqdm import tqdm
 
 # === CONFIGURATION ===
 # Directory containing the episode folders and .npy files
@@ -29,7 +30,7 @@ def split_files(files, train_ratio):
 
 def copy_and_rename(files, out_dir):
     os.makedirs(out_dir, exist_ok=True)
-    for idx, src in enumerate(files):
+    for idx, src in tqdm(enumerate(files)):
         dst = os.path.join(out_dir, f'episode_{idx}.npy')
         shutil.copy2(src, dst)
 
