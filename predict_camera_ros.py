@@ -19,8 +19,9 @@ import time
 RESIZE_IMAGE = False
 VISUALIZE_EACH_FRAME = False
 PUBLISH_RATE_HZ = 0.2  # Set desired publish rate in Hz (actions per second)
-OPENVLA_MODEL_PATH = "/root/huggingface_models/openvla-7b"
-UNNORM_KEY = "bridge_orig"
+# OPENVLA_MODEL_PATH = "/root/huggingface_models/openvla-7b"
+OPENVLA_MODEL_PATH = "/root/test_logs/openvla-7b+vigir_vla_mico+b16+lr-0.0005+lora-r32+dropout-0.0--image_aug"
+UNNORM_KEY = "vigir_vla_mico"
 
 class OpenVLAImagePredictor(Node):
     def __init__(self):
