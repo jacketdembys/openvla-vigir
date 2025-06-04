@@ -23,8 +23,10 @@ VISUALIZE_EXAMPLE_EPISODE = False           # From example data
 USE_WAND = False                            # Use wandb
 VISUALIZE_EACH_FRAME = False 
 RESIZE_IMAGE = False 
-DATASET = "bridge"   # jaco_play, droid           
-
+DATASET = "vigir"   # jaco_play, droid, robomimic           
+# OPENVLA_MODEL_PATH = "/root/huggingface_models/openvla-7b"
+OPENVLA_MODEL_PATH = "/root/test_logs/openvla-7b+vigir_vla_mico+b16+lr-0.0005+lora-r32+dropout-0.0--image_aug"
+UNNORM_KEY = "vigir_vla_mico"
 
 
 
@@ -55,9 +57,9 @@ if __name__ == '__main__':
 
     
     # Load Processor & VLA
-    processor = AutoProcessor.from_pretrained("openvla/openvla-7b", trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(OPENVLA_MODEL_PATH, trust_remote_code=True)
     vla = AutoModelForVision2Seq.from_pretrained(
-        "openvla/openvla-7b", 
+        OPENVLA_MODEL_PATH, 
         attn_implementation="flash_attention_2",  # [Optional] Requires `flash_attn`
         torch_dtype=torch.bfloat16, 
         low_cpu_mem_usage=True, 
@@ -154,168 +156,63 @@ if __name__ == '__main__':
 
 
     else:
-
-        if DATASET == "jaco_play":
-
-            print("\n==> Using test data from CLVR Jaco Play Dataset")
-
-            data_path = "/home/retina/dembysj/Dropbox/research/VLA/openvla/data/test_data_jaco_play.h5"
-            data = {}
-            with h5py.File(data_path) as F:
-                for key in F.keys():
-                    data[key] = np.array(F[key])
-
-            print("Dataset shapes: ")
-            for key in data:
-                print(f"{key}: {data[key].shape}")
-
+        if DATASET == "vigir":
             
-            if VISUALIZE_EXAMPLE_EPISODE:
-                image_seq = None
-                gt_ee_pose = None
-                for i in range(data['front_cam_ob'].shape[0])[::5]:
-                    if image_seq is None:
-                        image_seq = data['front_cam_ob'][i]
-                        #gt_ee_pose = data['ee_cartesian_pos_ob'][i]
-                    else:
-                        image_seq = np.concatenate((image_seq, data['front_cam_ob'][i]), axis=1)
-                        #gt_ee_pose_sequence = np.concatenate((gt_ee_pose, data['ee_cartesian_pos_ob'][i]), axis=1)
-                    if data['terminals'][i]: break
-
-                
-                
-                
-                print(f"\n\nCurrent prompt = {data['prompts'][0]}")
-                print(f"Sequence length: {image_seq.shape}")
-                print(f"Sequence length gt: {gt_ee_pose_sequence.shape}")
-
-                plt.figure(figsize=(20, 30))
-                plt.imshow(image_seq[..., ::-1])
-                plt.show()
-
-                #sys.exit()
-
-                
-            print(f"\n\nNumber of frames in the video: {data['front_cam_ob'].shape[0]}")
-            #sys.exit()
-            for i in range(data['front_cam_ob'].shape[0]): #[::50]:
-                current_frame = data['front_cam_ob'][i,:,:,:]
-                current_target_action = data['ee_cartesian_pos_ob'][i]
-                current_target_action[-1] = np.round(current_target_action[-1])
-                current_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
-                image = Image.fromarray(current_frame)
-
-                current_prompt = data['prompts'][i]
-                prompt = f"In: What action should the robot take to {current_prompt}?\nOut:"
-                print(f"Current prompt {i} for frame {i}: {current_prompt}")
-                print(f"Prompt given to the robot: {prompt}")
+            dataset_path = "/root/tensorflow_datasets"
+            dataset_name = "vigir_vla_mico"
             
-                
-                inputs = processor(prompt, image).to("cuda:0", dtype=torch.bfloat16)
-                #action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
-                action = vla.predict_action(**inputs, unnorm_key="jaco_play", do_sample=False)
-                action[-1] = np.round(action[-1])
-
-                np.set_printoptions(suppress=True)
-                #print(action)
-                print("Prediction:\t[" + " ".join(f"{x:.8f}" for x in action) + "]")
-                print("Target:\t\t[" + " ".join(f"{x:.8f}" for x in current_target_action) + "]")
-                print("\n")
-                
-                #sys.exit()
-
-                #print(action)
-                #print(current_target_action)
-
-                #sys.exit()
-                if USE_WAND:
-                    table.add_data(wandb.Image(image), *action)
-                    gtable.add_data(wandb.Image(image), *current_target_action)
-                    
-                if VISUALIZE_EACH_FRAME:
-                    plt.imshow(image)
-                    plt.axis("off")  
-                    plt.show()
-
-            if USE_WAND:
-                wandb.log({
-                    "Results Table": table,
-                    "GT Table": gtable
-                            })
-                #wandb.log()
-                wandb.finish()
-
-
-
-        elif DATASET == "droid":
-            
-            print("\n==> Using test data from local Jaco Play Dataset")
-
-            """
-            DATASET_NAMES = ['droid_100']
-            DOWNLOAD_DIR = './data/1.0.0'
-
-            print(f"Loading {len(DATASET_NAMES)} dataset from {DOWNLOAD_DIR}.")
-            for dataset_name in tqdm.tqdm(DATASET_NAMES):
-                data = tfds.load(dataset_name, data_dir=DOWNLOAD_DIR)
-
-            print(data)
-            """
-
-            dataset_path = "data"
-            dataset_name = "droid_100"
-            ds = tfds.load(dataset_name, data_dir=dataset_path, split="train")
+            ds = tfds.load(dataset_name, data_dir=dataset_path, split="val")
             images = []
-            for episode in ds.shuffle(10, seed=0).take(1):
+            counter = 0
+            total_loss = 0
+
+            for episode in ds.shuffle(buffer_size=10).take(10):
                 for i, step in enumerate(episode["steps"]):
 
                     print(f"\nProcessing frame {i}")
 
                     # get image
-                    image = step["observation"]["exterior_image_1_left"]
+                    print(step["observation"].keys())
+                    image = step["observation"]["image"]
                     image = image.numpy()
                     image = Image.fromarray(image)
                     #print(image)
 
-                    # get target pose
-                    action_pose = step["observation"]["cartesian_position"]
-                    action_pose = action_pose.numpy().tolist()
-                    #print(action_pose)
-
-                    # get target gripper
-                    action_gripper = step["observation"]["gripper_position"]
-                    action_gripper = action_gripper.numpy().tolist()
-                    #print(action_gripper)
-
-                    # build entire target pose action
-                    current_target_action = action_pose + action_gripper
-                    #print(action)
+                    # get entire target pose action
+                    current_target_action = step["action"]
+                    current_target_action = current_target_action.numpy().tolist()
+                    #print(current_target_action)
 
                     # get prompt
                     current_prompt = step["language_instruction"]
-                    current_prompt = current_prompt.numpy().decode("utf-8")
-                    #print(prompt)
+                    current_prompt = current_prompt.numpy().decode("utf-8")                  
 
                     prompt = f"In: What action should the robot take to {current_prompt}?\nOut:"
                     print(f"Current prompt {i} for frame {i}: {current_prompt}")
                     print(f"Prompt given to the robot: {prompt}")
+                    
 
                     # Process model
                     inputs = processor(prompt, image).to("cuda:0", dtype=torch.bfloat16)
                     #action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
-                    action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
+                    action = vla.predict_action(**inputs, unnorm_key="vigir_vla_mico", do_sample=False)
                     action[-1] = np.round(action[-1])
 
                     np.set_printoptions(suppress=True)
                     #print(action)
+                    # print("Normalized Prediction:\t[" + " ".join(f"{x:.8f}" for x in normalized_actions) + "]")
                     print("Prediction:\t[" + " ".join(f"{x:.8f}" for x in action) + "]")
                     print("Target:\t\t[" + " ".join(f"{x:.8f}" for x in current_target_action) + "]")
+                    print(f"L1 Loss: {np.abs(action - current_target_action).mean()}")
+                    total_loss += np.abs(action - current_target_action).mean()
+                    counter += 1
                     #print("\n")
                     
                     #sys.exit()
 
                     #print(action)
                     #print(current_target_action)
+                    # break
 
                     #sys.exit()
                     
@@ -328,25 +225,293 @@ if __name__ == '__main__':
                         plt.axis("off")  
                         plt.show()
 
-            if USE_WAND:
-                wandb.log({
-                    "Predictions Table": table,
-                    "Targets Table": gtable
-                            })
-                #wandb.log()
-                wandb.finish()
+                print(f"Total L1 Loss: {total_loss/counter}")
 
-            # Delete tensorflow variable and get out of the script
-            del ds, image, action_pose, action_gripper, prompt
+    #     if DATASET == "jaco_play":
+
+    #         print("\n==> Using test data from CLVR Jaco Play Dataset")
+
+    #         data_path = "/home/retina/dembysj/Dropbox/research/VLA/openvla/data/test_data_jaco_play.h5"
+    #         data = {}
+    #         with h5py.File(data_path) as F:
+    #             for key in F.keys():
+    #                 data[key] = np.array(F[key])
+
+    #         print("Dataset shapes: ")
+    #         for key in data:
+    #             print(f"{key}: {data[key].shape}")
+
+            
+    #         if VISUALIZE_EXAMPLE_EPISODE:
+    #             image_seq = None
+    #             gt_ee_pose = None
+    #             for i in range(data['front_cam_ob'].shape[0])[::5]:
+    #                 if image_seq is None:
+    #                     image_seq = data['front_cam_ob'][i]
+    #                     #gt_ee_pose = data['ee_cartesian_pos_ob'][i]
+    #                 else:
+    #                     image_seq = np.concatenate((image_seq, data['front_cam_ob'][i]), axis=1)
+    #                     #gt_ee_pose_sequence = np.concatenate((gt_ee_pose, data['ee_cartesian_pos_ob'][i]), axis=1)
+    #                 if data['terminals'][i]: break
+
+                
+                
+                
+    #             print(f"\n\nCurrent prompt = {data['prompts'][0]}")
+    #             print(f"Sequence length: {image_seq.shape}")
+    #             print(f"Sequence length gt: {gt_ee_pose_sequence.shape}")
+
+    #             plt.figure(figsize=(20, 30))
+    #             plt.imshow(image_seq[..., ::-1])
+    #             plt.show()
+
+    #             #sys.exit()
+
+                
+    #         print(f"\n\nNumber of frames in the video: {data['front_cam_ob'].shape[0]}")
+    #         #sys.exit()
+    #         for i in range(data['front_cam_ob'].shape[0]): #[::50]:
+    #             current_frame = data['front_cam_ob'][i,:,:,:]
+    #             current_target_action = data['ee_cartesian_pos_ob'][i]
+    #             current_target_action[-1] = np.round(current_target_action[-1])
+    #             current_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
+    #             image = Image.fromarray(current_frame)
+
+    #             current_prompt = data['prompts'][i]
+    #             prompt = f"In: What action should the robot take to {current_prompt}?\nOut:"
+    #             print(f"Current prompt {i} for frame {i}: {current_prompt}")
+    #             print(f"Prompt given to the robot: {prompt}")
+            
+                
+    #             inputs = processor(prompt, image).to("cuda:0", dtype=torch.bfloat16)
+    #             #action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
+    #             action = vla.predict_action(**inputs, unnorm_key="jaco_play", do_sample=False)
+    #             action[-1] = np.round(action[-1])
+
+    #             np.set_printoptions(suppress=True)
+    #             #print(action)
+    #             print("Prediction:\t[" + " ".join(f"{x:.8f}" for x in action) + "]")
+    #             print("Target:\t\t[" + " ".join(f"{x:.8f}" for x in current_target_action) + "]")
+    #             print("\n")
+                
+    #             #sys.exit()
+
+    #             #print(action)
+    #             #print(current_target_action)
+
+    #             #sys.exit()
+    #             if USE_WAND:
+    #                 table.add_data(wandb.Image(image), *action)
+    #                 gtable.add_data(wandb.Image(image), *current_target_action)
+                    
+    #             if VISUALIZE_EACH_FRAME:
+    #                 plt.imshow(image)
+    #                 plt.axis("off")  
+    #                 plt.show()
+
+    #         if USE_WAND:
+    #             wandb.log({
+    #                 "Results Table": table,
+    #                 "GT Table": gtable
+    #                         })
+    #             #wandb.log()
+    #             wandb.finish()
+
+
+    #     elif DATASET == "robomimic":
+            
+    #         print("\n==> Using test data from local RoboMimic Dataset")
+
+    #         """
+    #         DATASET_NAMES = ['droid_100']
+    #         DOWNLOAD_DIR = './data/1.0.0'
+
+    #         print(f"Loading {len(DATASET_NAMES)} dataset from {DOWNLOAD_DIR}.")
+    #         for dataset_name in tqdm.tqdm(DATASET_NAMES):
+    #             data = tfds.load(dataset_name, data_dir=DOWNLOAD_DIR)
+
+    #         print(data)
+    #         """
+
+    #         dataset_path = "data"
+    #         dataset_name = "robomimic_mg"
+    #         ds = tfds.load(dataset_name, data_dir=dataset_path, split="test")
+    #         images = []
+    #         for episode in ds.shuffle(10, seed=0).take(1):
+    #             for i, step in enumerate(episode["steps"]):
+
+    #                 print(f"\nProcessing frame {i}")
+
+    #                 # get image
+    #                 image = step["observation"]["exterior_image_1_left"]
+    #                 image = image.numpy()
+    #                 image = Image.fromarray(image)
+    #                 #print(image)
+
+    #                 # get target pose
+    #                 action_pose = step["observation"]["cartesian_position"]
+    #                 action_pose = action_pose.numpy().tolist()
+    #                 #print(action_pose)
+
+    #                 # get target gripper
+    #                 action_gripper = step["observation"]["gripper_position"]
+    #                 action_gripper = action_gripper.numpy().tolist()
+    #                 #print(action_gripper)
+
+    #                 # build entire target pose action
+    #                 current_target_action = action_pose + action_gripper
+    #                 #print(action)
+
+    #                 # get prompt
+    #                 current_prompt = step["language_instruction"]
+    #                 current_prompt = current_prompt.numpy().decode("utf-8")
+    #                 #print(prompt)
+
+    #                 prompt = f"In: What action should the robot take to {current_prompt}?\nOut:"
+    #                 print(f"Current prompt {i} for frame {i}: {current_prompt}")
+    #                 print(f"Prompt given to the robot: {prompt}")
+
+    #                 # Process model
+    #                 inputs = processor(prompt, image).to("cuda:0", dtype=torch.bfloat16)
+    #                 #action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
+    #                 action = vla.predict_action(**inputs, unnorm_key="robomimic", do_sample=False)
+    #                 action[-1] = np.round(action[-1])
+
+    #                 np.set_printoptions(suppress=True)
+    #                 #print(action)
+    #                 print("Prediction:\t[" + " ".join(f"{x:.8f}" for x in action) + "]")
+    #                 print("Target:\t\t[" + " ".join(f"{x:.8f}" for x in current_target_action) + "]")
+    #                 #print("\n")
+                    
+    #                 #sys.exit()
+
+    #                 #print(action)
+    #                 #print(current_target_action)
+
+    #                 #sys.exit()
+                    
+    #                 if USE_WAND:
+    #                     table.add_data(wandb.Image(image), *action)
+    #                     gtable.add_data(wandb.Image(image), *current_target_action)
+                    
+    #                 if VISUALIZE_EACH_FRAME:
+    #                     plt.imshow(image)
+    #                     plt.axis("off")  
+    #                     plt.show()
+
+    #         if USE_WAND:
+    #             wandb.log({
+    #                 "Predictions Table": table,
+    #                 "Targets Table": gtable
+    #                         })
+    #             #wandb.log()
+    #             wandb.finish()
+
+    #         # Delete tensorflow variable and get out of the script
+    #         del ds, image, action_pose, action_gripper, prompt
+
+
+    #     elif DATASET == "droid_100":
+            
+    #         print("\n==> Using test data from local Droid Dataset")
+
+    #         """
+    #         DATASET_NAMES = ['droid_100']
+    #         DOWNLOAD_DIR = './data/1.0.0'
+
+    #         print(f"Loading {len(DATASET_NAMES)} dataset from {DOWNLOAD_DIR}.")
+    #         for dataset_name in tqdm.tqdm(DATASET_NAMES):
+    #             data = tfds.load(dataset_name, data_dir=DOWNLOAD_DIR)
+
+    #         print(data)
+    #         """
+
+    #         dataset_path = "data"
+    #         dataset_name = "droid_100"
+    #         ds = tfds.load(dataset_name, data_dir=dataset_path, split="train")
+    #         images = []
+    #         for episode in ds.shuffle(10, seed=0).take(1):
+    #             for i, step in enumerate(episode["steps"]):
+
+    #                 print(f"\nProcessing frame {i}")
+
+    #                 # get image
+    #                 image = step["observation"]["exterior_image_1_left"]
+    #                 image = image.numpy()
+    #                 image = Image.fromarray(image)
+    #                 #print(image)
+
+    #                 # get target pose
+    #                 action_pose = step["observation"]["cartesian_position"]
+    #                 action_pose = action_pose.numpy().tolist()
+    #                 #print(action_pose)
+
+    #                 # get target gripper
+    #                 action_gripper = step["observation"]["gripper_position"]
+    #                 action_gripper = action_gripper.numpy().tolist()
+    #                 #print(action_gripper)
+
+    #                 # build entire target pose action
+    #                 current_target_action = action_pose + action_gripper
+    #                 #print(action)
+
+    #                 # get prompt
+    #                 current_prompt = step["language_instruction"]
+    #                 current_prompt = current_prompt.numpy().decode("utf-8")
+    #                 #print(prompt)
+
+    #                 prompt = f"In: What action should the robot take to {current_prompt}?\nOut:"
+    #                 print(f"Current prompt {i} for frame {i}: {current_prompt}")
+    #                 print(f"Prompt given to the robot: {prompt}")
+
+    #                 # Process model
+    #                 inputs = processor(prompt, image).to("cuda:0", dtype=torch.bfloat16)
+    #                 #action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
+    #                 action = vla.predict_action(**inputs, unnorm_key="droid_100", do_sample=False)
+    #                 action[-1] = np.round(action[-1])
+
+    #                 np.set_printoptions(suppress=True)
+    #                 #print(action)
+    #                 print("Prediction:\t[" + " ".join(f"{x:.8f}" for x in action) + "]")
+    #                 print("Target:\t\t[" + " ".join(f"{x:.8f}" for x in current_target_action) + "]")
+    #                 #print("\n")
+                    
+    #                 #sys.exit()
+
+    #                 #print(action)
+    #                 #print(current_target_action)
+
+    #                 #sys.exit()
+                    
+    #                 if USE_WAND:
+    #                     table.add_data(wandb.Image(image), *action)
+    #                     gtable.add_data(wandb.Image(image), *current_target_action)
+                    
+    #                 if VISUALIZE_EACH_FRAME:
+    #                     plt.imshow(image)
+    #                     plt.axis("off")  
+    #                     plt.show()
+
+    #         if USE_WAND:
+    #             wandb.log({
+    #                 "Predictions Table": table,
+    #                 "Targets Table": gtable
+    #                         })
+    #             #wandb.log()
+    #             wandb.finish()
+
+    #         # Delete tensorflow variable and get out of the script
+    #         del ds, image, action_pose, action_gripper, prompt
 
                     
             
        
-        elif DATASET == "bridge":
+        if DATASET == "bridge":
             
-            dataset_path = "data"
-            dataset_name = "bridge_orig"
-            ds = tfds.load(dataset_name, data_dir=dataset_path, split="train")
+            dataset_path = "./data"
+            dataset_name = "bridge_dataset"
+
+            ds = tfds.load(dataset_name, data_dir=dataset_path, split="val")
             images = []
 
             for episode in ds.shuffle(buffer_size=10).take(1):
@@ -377,13 +542,15 @@ if __name__ == '__main__':
                     # Process model
                     inputs = processor(prompt, image).to("cuda:0", dtype=torch.bfloat16)
                     #action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
-                    action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
+                    normalized_actions, action = vla.predict_action(**inputs, unnorm_key="bridge_orig", do_sample=False)
                     action[-1] = np.round(action[-1])
 
                     np.set_printoptions(suppress=True)
                     #print(action)
+                    print("Normalized Prediction:\t[" + " ".join(f"{x:.8f}" for x in normalized_actions) + "]")
                     print("Prediction:\t[" + " ".join(f"{x:.8f}" for x in action) + "]")
                     print("Target:\t\t[" + " ".join(f"{x:.8f}" for x in current_target_action) + "]")
+                    print(f"L1 Loss: {np.abs(action - current_target_action).mean()}")
                     #print("\n")
                     
                     #sys.exit()
